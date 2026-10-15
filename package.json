@@ -1,0 +1,29 @@
+{
+  "name": "ai-autonomous-testing-agent",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "npm run build -w @agent/contracts && npm run build -w @agent/api && npm run build -w @agent/web",
+    "test": "vitest run",
+    "dev:api": "npm run dev -w @agent/api",
+    "dev:web": "npm run dev -w @agent/web",
+    "start": "npm run start -w @agent/api",
+    "check:secrets": "node scripts/check-secrets.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.14",
+    "@types/node": "^22.0.0",
+    "@types/supertest": "^6.0.3",
+    "prettier": "^3.9.10",
+    "supertest": "^7.1.4",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
