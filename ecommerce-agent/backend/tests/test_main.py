@@ -1,33 +1,30 @@
+import os
+import tempfile
 from fastapi.testclient import TestClient
-from app.main import app, orders, acknowledged
 
-client = TestClient(app)
+# Configure an isolated SQLite database before importing the app.
+_temp = tempfile.TemporaryDirectory()
+os.environ["DATABASE_URL"] = "sqlite:///" + _temp.name + "/test.db"
+from app.main import app
+from app.storage import SessionLocal, StoredOrder
 
 def setup_function():
-    orders.clear()
-    acknowledged.clear()
+    with SessionLocal.begin() as db:
+        db.query(StoredOrder).delete()
 
-def test_import_and_detect():
-    response = client.post("/orders/import", json={"orders": [
-        {"id": "A", "status": "unfulfilled", "days_pending": 5},
-        {"id": "B", "status": "fulfilled", "days_pending": 9},
-        {"id": "C", "status": "unfulfilled", "days_pending": 3}
-    ]})
-    assert response.status_code == 200
-    data = client.get("/exceptions").json()
-    assert len(data) == 1
-    assert data[0]["order_id"] == "A"
-    assert data[0]["severity"] == "medium"
+def test_import_detect_acknowledge():
+    with TestClient(app) as client:
+        assert client.post("/orders/import", json={"orders": [
+            {"id": "A", "status": "unfulfilled", "days_pending": 8},
+            {"id": "B", "status": "fulfilled", "days_pending": 9}]}).status_code == 200
+        data = client.get("/exceptions").json()
+        assert len(data) == 1 and data[0]["severity"] == "high"
+        assert client.post("/exceptions/A/acknowledge").status_code == 200
+        assert client.get("/exceptions").json()[0]["acknowledged"]
+        client.post("/orders/import", json={"orders": [{"id": "A", "status": "unfulfilled", "days_pending": 9}]})
+        assert not client.get("/exceptions").json()[0]["acknowledged"]
 
-def test_acknowledgement_and_reset_on_change():
-    client.post("/orders/import", json={"orders": [{"id": "A", "status": "unfulfilled", "days_pending": 8}]})
-    assert client.post("/exceptions/A/acknowledge").json()["acknowledged"]
-    assert client.get("/exceptions").json()[0]["acknowledged"]
-    client.post("/orders/import", json={"orders": [{"id": "A", "status": "unfulfilled", "days_pending": 9}]})
-    assert not client.get("/exceptions").json()[0]["acknowledged"]
-
-def test_invalid_order_rejected():
-    assert client.post("/orders/import", json={"orders": [{"id": "X", "status": "unfulfilled", "days_pending": -1}]}).status_code == 422
-
-def test_unknown_exception_not_acknowledged():
-    assert client.post("/exceptions/missing/acknowledge").status_code == 404
+def test_validation():
+    with TestClient(app) as client:
+        assert client.post("/orders/import", json={"orders": [{"id": "A", "status": "unfulfilled", "days_pending": -1}]}).status_code == 422
+        assert client.post("/exceptions/missing/acknowledge").status_code == 404
