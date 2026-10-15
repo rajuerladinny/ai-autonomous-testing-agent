@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "node --env-file-if-exists=../../.env --watch dist/main.js",
-    "start": "node --env-file-if-exists=../../.env dist/main.js"
+    "start": "node --env-file-if-exists=../../.env dist/main.js",
+    "install:browser": "playwright install --with-deps chromium"
   },
   "dependencies": {
     "@agent/contracts": "*",

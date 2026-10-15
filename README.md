@@ -20,7 +20,7 @@ Requirements: Node.js 22 or newer, npm, Docker with Compose (or PostgreSQL 17), 
 npm ci
 node scripts/setup-env.mjs
 docker compose up -d db
-npx playwright install --with-deps chromium
+npm run install:browser
 npm run build
 npm run dev:api
 ```
