@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.14",
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.6.6",
     "@types/supertest": "^6.0.3",
     "prettier": "^3.9.10",
     "supertest": "^7.1.4",
