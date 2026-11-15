@@ -28,3 +28,7 @@
 **Operational controls are initial.** The shared admin token has no user separation, password reset or session revocation service. Rotate it locally and restart to revoke access. DB ownership permits direct SQL modification; the API exposes no audit edit operation, but logs are not cryptographically tamper-proof. There is no artifact retention/deletion UI, cancellation endpoint, distributed rate limit or automatic backup management.
 
 Use a secrets manager, scoped database role, HTTPS, per-user authentication/RBAC, independent approvals, egress-isolated worker containers, retention controls and a security review before a team/customer launch.
+
+## Demo mode
+
+The demo (`?demo`, the **Explore the demo** button, or a `VITE_DEMO_MODE=true` build) replaces the API with an in-memory stand-in inside the browser tab. It sends no requests, stores nothing, uses fictional data and does not crawl any site. Its digests are illustrative, not SHA-256; approvals made in the demo carry no meaning outside it.

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ShieldCheck,
@@ -16,12 +16,22 @@ import {
   ChevronRight,
   LoaderCircle,
   FileCheck2,
+  Search,
+  Sparkles,
 } from 'lucide-react';
 import type { Project, Discovery, TestCase, Run, Report } from '@agent/contracts';
+import { httpRequest, type Backend, type Config, type EventRow } from './lib/api';
+import { createDemoBackend } from './lib/demo';
+import { downloadText, passRate, toCsv, toJUnitXml } from './lib/report';
+import { Badge, ErrorBoundary, RunTrend, Stat } from './components';
 import './style.css';
 
-type EventRow = { id: string; action: string; created_at: string };
-type Config = { aiEnabled: boolean; mode: string; maxTestsPerRun: number };
+// Set by the Vite config for demo builds; absent when the UI is served without it.
+declare const __DEMO__: boolean | undefined;
+const DEMO_BUILD = typeof __DEMO__ !== 'undefined' && __DEMO__ === true;
+const DEMO_TOKEN = 'demo';
+const STATUS_FILTERS = ['ALL', 'DRAFT', 'APPROVED', 'REJECTED'] as const;
+type StatusFilter = (typeof STATUS_FILTERS)[number];
 const friendlyTime = (value: string) =>
   new Date(value).toLocaleString(undefined, {
     month: 'short',
@@ -29,14 +39,6 @@ const friendlyTime = (value: string) =>
     hour: '2-digit',
     minute: '2-digit',
   });
-function Badge({ status }: { status: string }) {
-  return (
-    <span className={`badge ${status.toLowerCase()}`}>
-      <span />
-      {status}
-    </span>
-  );
-}
 
 function App() {
   const [token, setToken] = useState(''),
@@ -56,6 +58,9 @@ function App() {
   const [runIds, setRunIds] = useState<string[]>([]),
     [consent, setConsent] = useState(false),
     [report, setReport] = useState<Report | null>(null);
+  const [demo, setDemo] = useState<Backend | null>(null),
+    [filter, setFilter] = useState<StatusFilter>('ALL'),
+    [query, setQuery] = useState('');
   const [name, setName] = useState(''),
     [url, setUrl] = useState(''),
     [paths, setPaths] = useState('/'),
@@ -63,20 +68,9 @@ function App() {
     [ownership, setOwnership] = useState(false);
   const project = projects.find((p) => p.id === selected);
   const api = useCallback(
-    async <T,>(path: string, body?: unknown, auth = token): Promise<T> => {
-      const response = await fetch(`/api${path}`, {
-        method: body === undefined ? 'GET' : 'POST',
-        headers: {
-          Authorization: `Bearer ${auth}`,
-          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-        },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message ?? 'Request failed');
-      return data as T;
-    },
-    [token],
+    <T,>(path: string, body?: unknown, auth = token): Promise<T> =>
+      demo ? demo.request<T>(path, body) : httpRequest<T>(path, body, auth),
+    [token, demo],
   );
   const action = async (fn: () => Promise<void>, refresh = true) => {
     setBusy(true);
@@ -105,17 +99,47 @@ function App() {
       setAdd(p.length === 0);
     });
   };
+  const startDemo = useCallback(() => {
+    const backend = createDemoBackend();
+    setBusy(true);
+    setError('');
+    void Promise.all([backend.request<Config>('/config'), backend.request<Project[]>('/projects')])
+      .then(([c, p]) => {
+        setDemo(backend);
+        setConfig(c);
+        setProjects(p);
+        setSelected(p[0]?.id ?? '');
+        setToken(DEMO_TOKEN);
+        setAdd(false);
+      })
+      .catch(() => setError('The demo could not start'))
+      .finally(() => setBusy(false));
+  }, []);
   useEffect(() => {
-    if (!token || !selected) return;
-    let cancelled = false,
-      timer: ReturnType<typeof setTimeout>;
+    if (DEMO_BUILD || new URLSearchParams(window.location.search).has('demo')) startDemo();
+  }, [startDemo]);
+  // Clear project-scoped state only when the project changes, so a refresh after an
+  // action updates the lists in place instead of flashing the empty state.
+  useEffect(() => {
     setDiscoveries([]);
     setTests([]);
     setRuns([]);
     setEvents([]);
     setReport(null);
     setRunIds([]);
+    setFilter('ALL');
+    setQuery('');
+  }, [token, selected]);
+  useEffect(() => {
+    if (!token || !selected) return;
+    let cancelled = false,
+      timer: ReturnType<typeof setTimeout>;
     async function load() {
+      // Skip polling while the tab is in the background.
+      if (document.hidden) {
+        timer = setTimeout(() => void load(), 1000);
+        return;
+      }
       try {
         const [d, t, r, a] = await Promise.all([
           api<Discovery[]>(`/projects/${selected}/discoveries`),
@@ -132,7 +156,7 @@ function App() {
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Could not refresh');
       } finally {
-        if (!cancelled) timer = setTimeout(() => void load(), 4000);
+        if (!cancelled) timer = setTimeout(() => void load(), demo ? 1200 : 4000);
       }
     }
     void load();
@@ -140,7 +164,7 @@ function App() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [token, selected, revision, api]);
+  }, [token, selected, revision, api, demo]);
   const create = (e: React.FormEvent) => {
     e.preventDefault();
     void action(async () => {
@@ -160,16 +184,19 @@ function App() {
       setConsent(false);
     });
   };
-  const download = (value: Report) => {
-    const objectUrl = URL.createObjectURL(
-      new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }),
+  const download = (value: Report) =>
+    downloadText(`run-${value.id}.json`, JSON.stringify(value, null, 2), 'application/json');
+  const visibleTests = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return tests.filter(
+      (t) =>
+        (filter === 'ALL' || t.status === filter) &&
+        (!needle ||
+          t.spec.title.toLowerCase().includes(needle) ||
+          t.spec.path.toLowerCase().includes(needle)),
     );
-    const a = document.createElement('a');
-    a.href = objectUrl;
-    a.download = `run-${value.id}.json`;
-    a.click();
-    URL.revokeObjectURL(objectUrl);
-  };
+  }, [tests, filter, query]);
+  const rate = useMemo(() => passRate(runs), [runs]);
   if (!token)
     return (
       <main className="login">
@@ -204,12 +231,23 @@ function App() {
               <ArrowUpRight size={17} />
             </button>
           </form>
+          <button
+            type="button"
+            disabled={busy}
+            className="secondary demo-button"
+            onClick={startDemo}
+          >
+            <Sparkles size={16} />
+            Explore the demo
+          </button>
           {error && (
             <div role="alert" className="error">
               {error}
             </div>
           )}
-          <small>Your token stays in this tab’s memory.</small>
+          <small>
+            Your token stays in this tab’s memory. The demo uses sample data and needs no token.
+          </small>
         </div>
         <div className="login-art">
           <Radar size={180} strokeWidth={0.7} />
@@ -266,6 +304,7 @@ function App() {
           className="signout"
           onClick={() => {
             setToken('');
+            setDemo(null);
             setConfig(null);
             setProjects([]);
             setSelected('');
@@ -307,6 +346,15 @@ function App() {
               New project
             </button>
           </div>
+          {demo && (
+            <div className="demo-banner" role="status">
+              <Sparkles size={16} />
+              <span>
+                <strong>Demo mode.</strong> Sample data, simulated jobs, nothing leaves your
+                browser. Reloading resets it.
+              </span>
+            </div>
+          )}
           {error && (
             <div role="alert" className="error">
               {error}
@@ -451,7 +499,13 @@ function App() {
                     <Stat
                       label="Test runs"
                       value={String(runs.length)}
-                      note={running ? 'Work is in progress' : 'All results in one place'}
+                      note={
+                        running
+                          ? 'Work is in progress'
+                          : rate === null
+                            ? 'All results in one place'
+                            : `${rate}% of results passed`
+                      }
                       icon={<Play size={21} />}
                     />
                   </div>
@@ -541,15 +595,49 @@ function App() {
                       </div>
                       <span className="muted">Showing latest 200</span>
                     </div>
+                    {tests.length > 0 && (
+                      <div className="filter-bar">
+                        <div className="filter-tabs" role="group" aria-label="Filter by status">
+                          {STATUS_FILTERS.map((f) => (
+                            <button
+                              key={f}
+                              type="button"
+                              aria-pressed={filter === f}
+                              className={filter === f ? 'active' : ''}
+                              onClick={() => setFilter(f)}
+                            >
+                              {f === 'ALL' ? 'All' : f.charAt(0) + f.slice(1).toLowerCase()}
+                              <span>
+                                {f === 'ALL'
+                                  ? tests.length
+                                  : tests.filter((t) => t.status === f).length}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                        <div className="search">
+                          <Search size={15} />
+                          <input
+                            type="search"
+                            aria-label="Search tests"
+                            placeholder="Search by title or path"
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    )}
                     {tests.length === 0 ? (
                       <div className="empty-state">
                         <FlaskConical size={30} />
                         <h3>Your next test starts with discovery</h3>
                         <p>Discover your application, then generate your first set of drafts.</p>
                       </div>
+                    ) : visibleTests.length === 0 ? (
+                      <p className="empty">No tests match this filter.</p>
                     ) : (
                       <div className="test-list">
-                        {tests.map((t) => (
+                        {visibleTests.map((t) => (
                           <article key={t.id} className="test-card">
                             <div className="test-title">
                               {t.status === 'APPROVED' ? (
@@ -671,6 +759,7 @@ function App() {
                     <section className="panel">
                       <div className="section-head">
                         <h2>Execution reports</h2>
+                        <RunTrend runs={runs} />
                         <span className="muted">Latest 50</span>
                       </div>
                       {runs.length ? (
@@ -715,17 +804,44 @@ function App() {
                             {report.summary.total} selected
                           </p>
                         </div>
-                        <button className="secondary" onClick={() => download(report)}>
-                          <Download size={16} />
-                          Export JSON
-                        </button>
+                        <div className="export-actions">
+                          <button className="secondary" onClick={() => download(report)}>
+                            <Download size={16} />
+                            Export JSON
+                          </button>
+                          <button
+                            className="secondary"
+                            onClick={() =>
+                              downloadText(
+                                `run-${report.id}.junit.xml`,
+                                toJUnitXml(report),
+                                'application/xml',
+                              )
+                            }
+                          >
+                            <Download size={16} />
+                            JUnit XML
+                          </button>
+                          <button
+                            className="secondary"
+                            onClick={() =>
+                              downloadText(`run-${report.id}.csv`, toCsv(report), 'text/csv')
+                            }
+                          >
+                            <Download size={16} />
+                            CSV
+                          </button>
+                        </div>
                       </div>
                       {report.error && <p className="error-text">{report.error}</p>}
                       {report.results.map((r) => (
                         <div className="history-row" key={r.testId}>
                           <Badge status={r.status} />
                           <strong>{r.title}</strong>
-                          <span className="muted">{r.durationMs} ms</span>
+                          <span className="muted">
+                            {r.assertions.filter((a) => a.passed).length}/{r.assertions.length}{' '}
+                            assertions · {r.durationMs} ms
+                          </span>
                           {r.error && <span>{r.error}</span>}
                         </div>
                       ))}
@@ -761,30 +877,10 @@ function App() {
     </div>
   );
 }
-function Stat({
-  label,
-  value,
-  note,
-  icon,
-}: {
-  label: string;
-  value: string;
-  note: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <div className="stat">
-      <div>
-        <span>{label}</span>
-        {icon}
-      </div>
-      <strong>{value}</strong>
-      <small>{note}</small>
-    </div>
-  );
-}
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>,
 );
