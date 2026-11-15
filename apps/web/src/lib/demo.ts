@@ -51,8 +51,9 @@ const CATALOGUE: PageSnapshot[] = [
     links: ['/'],
   },
 ];
-/** The demo target "changes" this page after discovery, so one test can fail. */
+/** The demo target "changes" this page ten hours before the demo opens, so a test regresses. */
 const DRIFTED_PATH = '/status';
+const DRIFT_OFFSET = -10 * HOUR;
 
 type Job = { kind: 'DISCOVER' | 'RUN'; id: string; at: number; testIds: string[] };
 
@@ -80,6 +81,7 @@ export function createDemoBackend(clock: () => number = Date.now): Backend {
   let counter = 0;
   const id = () => `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`;
   const iso = (offset = 0) => new Date(clock() + offset).toISOString();
+  const driftAt = clock() + DRIFT_OFFSET;
 
   const projects: Project[] = [];
   const discoveries: Discovery[] = [];
@@ -127,10 +129,10 @@ export function createDemoBackend(clock: () => number = Date.now): Backend {
     }
     return created;
   }
-  function execute(testIds: string[]): CaseResult[] {
+  function execute(testIds: string[], at = clock()): CaseResult[] {
     return testIds.map((testId): CaseResult => {
       const t = tests.find((x) => x.id === testId)!;
-      const drifted = t.spec.path === DRIFTED_PATH;
+      const drifted = t.spec.path === DRIFTED_PATH && at >= driftAt;
       const assertions = t.spec.assertions.map((a) => ({
         kind: a.kind,
         passed: !(drifted && a.kind === 'heading'),
@@ -248,6 +250,17 @@ export function createDemoBackend(clock: () => number = Date.now): Backend {
     log(projectId, 'RUN_QUEUED');
     return { id: run.id, status: run.status };
   }
+  function cancel(kind: Job['kind'], entityId: string) {
+    const entity = (kind === 'DISCOVER' ? discoveries : runs).find((x) => x.id === entityId);
+    if (!entity) fail(kind === 'DISCOVER' ? 'Discovery not found' : 'Run not found');
+    if (entity.status !== 'QUEUED') fail('Only a queued job can be cancelled');
+    jobs = jobs.filter((j) => j.id !== entityId);
+    entity.status = 'FAILED';
+    entity.error = 'Cancelled before it started';
+    if ('finished_at' in entity) entity.finished_at = iso();
+    log(entity.project_id, 'JOB_CANCELLED');
+    return { id: entityId, status: entity.status };
+  }
   function report(runId: string): Report {
     const run = runs.find((r) => r.id === runId) ?? fail('Run not found');
     return {
@@ -298,6 +311,8 @@ export function createDemoBackend(clock: () => number = Date.now): Backend {
       log(d.project_id, 'TESTS_GENERATED');
       return { created, source: 'deterministic' };
     }
+    if ((m = path.match(/^\/(discoveries|runs)\/([^/]+)\/cancel$/)) && !read)
+      return cancel(m[1] === 'runs' ? 'RUN' : 'DISCOVER', m[2]);
     if ((m = path.match(/^\/projects\/([^/]+)\/tests$/)) && read)
       return tests.filter((t) => t.project_id === m![1]);
     if ((m = path.match(/^\/tests\/([^/]+)\/decision$/)) && !read) return decide(m[1], body);
@@ -344,14 +359,17 @@ export function createDemoBackend(clock: () => number = Date.now): Backend {
     log(seed.id, 'TEST_APPROVED', -47 * HOUR);
   }
   for (const [offset, paths] of [
-    [-26 * HOUR, ['/', '/docs']],
+    [-26 * HOUR, ['/', '/docs', '/status']],
     [-3 * HOUR, ['/', '/docs', '/status']],
   ] as const) {
     runs.unshift({
       id: id(),
       project_id: seed.id,
       status: 'SUCCEEDED',
-      results: execute(paths.map((p) => byPath(p).id)),
+      results: execute(
+        paths.map((p) => byPath(p).id),
+        clock() + offset,
+      ),
       error: null,
       created_at: iso(offset),
       finished_at: iso(offset + 4000),

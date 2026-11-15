@@ -136,6 +136,45 @@ describe('PostgreSQL workflow (PGlite PostgreSQL engine)', () => {
     ).toBe('FAILED');
     expect(browser.discover).not.toHaveBeenCalled();
   });
+  it('cancels a queued discovery, never a finished or unknown one', async () => {
+    const discovery = await service.discover(project.id);
+    expect(await service.cancel('DISCOVER', discovery.id)).toEqual({
+      id: discovery.id,
+      status: 'FAILED',
+    });
+    expect(await service.processNext()).toBe(false);
+    expect(browser.discover).not.toHaveBeenCalled();
+    const [cancelled] = await service.listDiscoveries(project.id);
+    expect(cancelled.status).toBe('FAILED');
+    expect(cancelled.error).toBe('Cancelled before it started');
+    await expect(service.cancel('DISCOVER', discovery.id)).rejects.toThrow('queued');
+    await expect(service.cancel('RUN', discovery.id)).rejects.toThrow('not found');
+    await expect(service.cancel('RUN', randomUUID())).rejects.toThrow('not found');
+    expect((await service.events(project.id)).map((e) => e.action)).toContain('JOB_CANCELLED');
+    // Cancelling frees the project for a new discovery.
+    await service.discover(project.id);
+    expect(await service.processNext()).toBe(true);
+    expect(browser.discover).toHaveBeenCalledTimes(1);
+  });
+  it('cancels a queued run without executing it or touching approvals', async () => {
+    const [test] = await drafts();
+    await service.decide(test.id, { decision: 'APPROVED', digest: test.digest });
+    const run = await service.createRun(project.id, { testIds: [test.id] });
+    await service.cancel('RUN', run.id);
+    expect(await service.processNext()).toBe(false);
+    expect(browser.execute).not.toHaveBeenCalled();
+    const report = await service.report(run.id);
+    expect(report.status).toBe('FAILED');
+    expect(report.error).toBe('Cancelled before it started');
+    expect(report.finished_at).not.toBeNull();
+    expect((await service.tests(project.id))[0].status).toBe('APPROVED');
+  });
+  it('refuses to cancel a job the worker has already finished', async () => {
+    const discovery = await service.discover(project.id);
+    expect(await service.processNext()).toBe(true);
+    await expect(service.cancel('DISCOVER', discovery.id)).rejects.toThrow('queued');
+    expect((await service.listDiscoveries(project.id))[0].status).toBe('SUCCEEDED');
+  });
   it('never generates from incomplete discoveries', async () => {
     const d = await service.discover(project.id);
     await expect(service.generate(d.id, { allowExternalAi: false })).rejects.toThrow('Completed');

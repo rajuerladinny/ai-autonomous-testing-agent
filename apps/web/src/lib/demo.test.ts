@@ -24,7 +24,26 @@ describe('demo backend', () => {
     expect(tests.every((t) => /^[a-f0-9]{64}$/.test(t.digest))).toBe(true);
     const runs = await backend.request<Run[]>(`/projects/${project.id}/runs`);
     expect(runs).toHaveLength(2);
-    expect(runs[0].results.some((r) => r.status === 'FAILED')).toBe(true);
+    // The older run passed in full; the newer one shows a regression.
+    expect(runs[0].results.filter((r) => r.status === 'FAILED')).toHaveLength(1);
+    expect(runs[1].results.every((r) => r.status === 'PASSED')).toBe(true);
+  });
+
+  it('cancels a queued job and frees the project for a new one', async () => {
+    const { backend, advance } = setup();
+    const [project] = await backend.request<Project[]>('/projects');
+    const path = `/projects/${project.id}/discoveries`;
+    const queued = await backend.request<{ id: string }>(path, {});
+    await backend.request(`/discoveries/${queued.id}/cancel`, {});
+    advance(5000);
+    const [cancelled] = await backend.request<Discovery[]>(path);
+    expect(cancelled.status).toBe('FAILED');
+    expect(cancelled.error).toBe('Cancelled before it started');
+    await expect(backend.request(`/discoveries/${queued.id}/cancel`, {})).rejects.toThrow(
+      'Only a queued job',
+    );
+    await expect(backend.request('/runs/unknown/cancel', {})).rejects.toThrow('Run not found');
+    await backend.request(path, {});
   });
 
   it('moves a discovery through queued, running and succeeded', async () => {

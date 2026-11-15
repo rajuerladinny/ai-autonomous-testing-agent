@@ -43,6 +43,12 @@ class ApiController {
   @Post('discoveries/:id/generate') generate(@Param('id') id: string, @Body() body: unknown) {
     return this.service.generate(id, body);
   }
+  @Post('discoveries/:id/cancel') cancelDiscovery(@Param('id') id: string) {
+    return this.service.cancel('DISCOVER', id);
+  }
+  @Post('runs/:id/cancel') cancelRun(@Param('id') id: string) {
+    return this.service.cancel('RUN', id);
+  }
   @Get('projects/:id/tests') tests(@Param('id') id: string) {
     return this.service.tests(id);
   }

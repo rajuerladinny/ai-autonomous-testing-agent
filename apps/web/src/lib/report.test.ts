@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { Report } from '@agent/contracts';
-import { csvCell, escapeXml, passRate, toCsv, toJUnitXml } from './report';
+import {
+  compareRuns,
+  csvCell,
+  escapeXml,
+  passRate,
+  previousFinished,
+  toCsv,
+  toJUnitXml,
+} from './report';
 
 const report: Report = {
   id: 'run-1',
@@ -63,6 +71,34 @@ describe('report exports', () => {
       'test_id,title,status,duration_ms,assertions_passed,assertions_total,error',
     );
     expect(lines[2]).toBe('"t-2","Check <b>""docs"" & more","FAILED","1250","1","2",""');
+  });
+  it('flags tests whose outcome flipped since the previous run', () => {
+    const result = (testId: string, status: 'PASSED' | 'FAILED') => ({
+      ...report.results[0],
+      testId,
+      status,
+    });
+    const previous = { results: [result('a', 'PASSED'), result('b', 'FAILED'), result('c', 'PASSED')] };
+    const current = {
+      results: [result('a', 'FAILED'), result('b', 'PASSED'), result('c', 'PASSED'), result('d', 'FAILED')],
+    };
+    expect([...compareRuns(current, previous)]).toEqual([
+      ['a', 'REGRESSED'],
+      ['b', 'FIXED'],
+    ]);
+    expect(compareRuns(current, undefined).size).toBe(0);
+  });
+  it('finds the previous finished run in a newest-first list', () => {
+    const run = (id: string, status: 'SUCCEEDED' | 'FAILED' | 'QUEUED', n = 1) => ({
+      id,
+      status,
+      results: report.results.slice(0, n),
+    });
+    const runs = [run('4', 'QUEUED', 0), run('3', 'SUCCEEDED'), run('2', 'FAILED', 0), run('1', 'SUCCEEDED')];
+    expect(previousFinished(runs, '3')?.id).toBe('1');
+    expect(previousFinished(runs, '4')?.id).toBe('3');
+    expect(previousFinished(runs, '1')).toBeUndefined();
+    expect(previousFinished(runs, 'missing')).toBeUndefined();
   });
   it('computes the pass rate across runs', () => {
     expect(passRate([])).toBeNull();

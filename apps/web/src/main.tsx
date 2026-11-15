@@ -18,11 +18,21 @@ import {
   FileCheck2,
   Search,
   Sparkles,
+  Ban,
+  RotateCcw,
+  ListChecks,
 } from 'lucide-react';
 import type { Project, Discovery, TestCase, Run, Report } from '@agent/contracts';
 import { httpRequest, type Backend, type Config, type EventRow } from './lib/api';
 import { createDemoBackend } from './lib/demo';
-import { downloadText, passRate, toCsv, toJUnitXml } from './lib/report';
+import {
+  compareRuns,
+  downloadText,
+  passRate,
+  previousFinished,
+  toCsv,
+  toJUnitXml,
+} from './lib/report';
 import { Badge, ErrorBoundary, RunTrend, Stat } from './components';
 import './style.css';
 
@@ -264,6 +274,10 @@ function App() {
 
   const approved = tests.filter((t) => t.status === 'APPROVED'),
     latest = discoveries.find((d) => d.status === 'SUCCEEDED');
+  const approvedIds = new Set(approved.map((t) => t.id));
+  const reportChanges = report
+    ? compareRuns(report, previousFinished(runs, report.id))
+    : new Map<string, 'REGRESSED' | 'FIXED'>();
   const running =
     discoveries.some((d) => d.status === 'QUEUED' || d.status === 'RUNNING') ||
     runs.some((r) => r.status === 'QUEUED' || r.status === 'RUNNING');
@@ -615,6 +629,30 @@ function App() {
                             </button>
                           ))}
                         </div>
+                        <div className="selection-actions">
+                          <button
+                            type="button"
+                            className="quiet"
+                            disabled={!visibleTests.some((t) => t.status === 'APPROVED')}
+                            onClick={() =>
+                              setRunIds(
+                                visibleTests
+                                  .filter((t) => t.status === 'APPROVED')
+                                  .slice(0, 20)
+                                  .map((t) => t.id),
+                              )
+                            }
+                          >
+                            <ListChecks size={14} />
+                            Select approved
+                          </button>
+                          {runIds.length > 0 && (
+                            <button type="button" className="quiet" onClick={() => setRunIds([])}>
+                              <X size={14} />
+                              Clear
+                            </button>
+                          )}
+                        </div>
                         <div className="search">
                           <Search size={15} />
                           <input
@@ -736,6 +774,21 @@ function App() {
                               {d.error && <small className="error-text">{d.error}</small>}
                             </div>
                             <Badge status={d.status} />
+                            {d.status === 'QUEUED' && (
+                              <button
+                                className="icon-button"
+                                aria-label="Cancel queued discovery"
+                                title="Cancel before it starts"
+                                disabled={busy}
+                                onClick={() =>
+                                  void action(async () => {
+                                    await api(`/discoveries/${d.id}/cancel`, {});
+                                  })
+                                }
+                              >
+                                <Ban size={16} />
+                              </button>
+                            )}
                           </div>
                         ))
                       ) : (
@@ -763,7 +816,16 @@ function App() {
                         <span className="muted">Latest 50</span>
                       </div>
                       {runs.length ? (
-                        runs.map((r) => (
+                        runs.map((r) => {
+                          const changes = [
+                            ...compareRuns(r, previousFinished(runs, r.id)).values(),
+                          ];
+                          const regressed = changes.filter((c) => c === 'REGRESSED').length;
+                          const fixed = changes.length - regressed;
+                          const rerunIds = r.results
+                            .map((x) => x.testId)
+                            .filter((id) => approvedIds.has(id));
+                          return (
                           <div key={r.id} className="history-row">
                             <Play size={17} />
                             <div>
@@ -772,9 +834,48 @@ function App() {
                                 {r.results.filter((x) => x.status === 'FAILED').length} failed
                               </strong>
                               <small>{friendlyTime(r.created_at)}</small>
+                              {regressed > 0 && (
+                                <small className="error-text">
+                                  {regressed} new {regressed === 1 ? 'failure' : 'failures'} since
+                                  the previous run
+                                </small>
+                              )}
+                              {fixed > 0 && (
+                                <small className="fixed-text">{fixed} fixed since the previous run</small>
+                              )}
                               {r.error && <small className="error-text">{r.error}</small>}
                             </div>
                             <Badge status={r.status} />
+                            {r.status === 'QUEUED' && (
+                              <button
+                                className="icon-button"
+                                aria-label="Cancel queued run"
+                                title="Cancel before it starts"
+                                disabled={busy}
+                                onClick={() =>
+                                  void action(async () => {
+                                    await api(`/runs/${r.id}/cancel`, {});
+                                  })
+                                }
+                              >
+                                <Ban size={16} />
+                              </button>
+                            )}
+                            {r.status === 'SUCCEEDED' && r.results.length > 0 && (
+                              <button
+                                className="icon-button"
+                                aria-label="Run these tests again"
+                                title="Run these tests again"
+                                disabled={busy || running || rerunIds.length === 0}
+                                onClick={() =>
+                                  void action(async () => {
+                                    await api(`/projects/${selected}/runs`, { testIds: rerunIds });
+                                  })
+                                }
+                              >
+                                <RotateCcw size={16} />
+                              </button>
+                            )}
                             <button
                               className="icon-button"
                               aria-label="View run report"
@@ -788,7 +889,8 @@ function App() {
                               <ArrowUpRight size={17} />
                             </button>
                           </div>
-                        ))
+                          );
+                        })
                       ) : (
                         <p className="empty">Approved tests are ready when you are.</p>
                       )}
@@ -838,6 +940,13 @@ function App() {
                         <div className="history-row" key={r.testId}>
                           <Badge status={r.status} />
                           <strong>{r.title}</strong>
+                          {reportChanges.has(r.testId) && (
+                            <span
+                              className={`change ${reportChanges.get(r.testId) === 'REGRESSED' ? 'regressed' : 'fixed'}`}
+                            >
+                              {reportChanges.get(r.testId) === 'REGRESSED' ? 'New failure' : 'Fixed'}
+                            </span>
+                          )}
                           <span className="muted">
                             {r.assertions.filter((a) => a.passed).length}/{r.assertions.length}{' '}
                             assertions · {r.durationMs} ms

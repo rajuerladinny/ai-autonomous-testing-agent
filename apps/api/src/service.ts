@@ -241,6 +241,33 @@ export class AgentService {
     });
     return { id, status: 'QUEUED' };
   }
+  /** Cancels a job that has not started. A job the worker has claimed is never interrupted. */
+  async cancel(kind: 'DISCOVER' | 'RUN', entityId: string) {
+    Id.parse(entityId);
+    const table = kind === 'DISCOVER' ? 'discoveries' : 'runs';
+    await this.db.transaction(async (tx) => {
+      // The status guard makes this safe against the worker claiming the same job.
+      const job = (
+        await tx.query<{ id: string }>(
+          "UPDATE jobs SET status='FAILED',finished_at=now() WHERE entity_id=$1 AND kind=$2 AND status='QUEUED' RETURNING id",
+          [entityId, kind],
+        )
+      ).rows[0];
+      if (!job) {
+        const known = (await tx.query(`SELECT id FROM ${table} WHERE id=$1`, [entityId])).rows
+          .length;
+        if (!known)
+          throw new NotFoundException(kind === 'DISCOVER' ? 'Discovery not found' : 'Run not found');
+        throw new ConflictException('Only a queued job can be cancelled');
+      }
+      await tx.query(
+        `UPDATE ${table} SET status='FAILED',error='Cancelled before it started'${kind === 'RUN' ? ',finished_at=now()' : ''} WHERE id=$1`,
+        [entityId],
+      );
+      await audit(tx, 'JOB_CANCELLED', entityId);
+    });
+    return { id: entityId, status: 'FAILED' };
+  }
   async runs(projectId: string) {
     await this.project(projectId);
     return (
