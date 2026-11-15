@@ -11,6 +11,7 @@
   },
   "scripts": {
     "build": "npm run build -w @agent/contracts && npm run build -w @agent/api && npm run build -w @agent/web",
+    "build:demo": "node scripts/build-demo.mjs",
     "test": "vitest run",
     "dev:api": "npm run dev -w @agent/api",
     "dev:web": "npm run dev -w @agent/web",

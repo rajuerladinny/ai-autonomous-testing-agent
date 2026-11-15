@@ -1,6 +1,48 @@
-# AI Autonomous Testing Agent — initial MVP
+# Sentinel — AI Autonomous Testing Agent
 
-A human-supervised web testing workspace built with React, TypeScript, NestJS, PostgreSQL and Playwright. The UI is named **Sentinel**. It discovers approved server-rendered pages, generates evidence-backed smoke test drafts, requires individual human approval, executes approved immutable specifications, and reports results.
+[![Verify](https://github.com/rajuerladinny/ai-autonomous-testing-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/rajuerladinny/ai-autonomous-testing-agent/actions/workflows/ci.yml)
+![React 19](https://img.shields.io/badge/React-19-149eca)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
+![NestJS 11](https://img.shields.io/badge/NestJS-11-e0234e)
+![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-336791)
+![Playwright](https://img.shields.io/badge/Playwright-1.58-2ead33)
+
+A human-supervised web testing workspace. Sentinel discovers the pages of a site you are authorized to test, drafts smoke tests from what it actually saw, and runs only the tests a person has approved. Built with React, TypeScript, NestJS, PostgreSQL and Playwright.
+
+**Status:** MVP for local evaluation. See [Current scope](#current-scope) for what it does not do yet.
+
+## Try the demo
+
+The workspace has a demo mode that runs entirely in the browser: sample project, simulated discovery and runs, no API, database or token.
+
+```bash
+npm ci
+npm run build -w @agent/contracts
+npm run dev:web
+```
+
+Open **http://127.0.0.1:5173/?demo** or choose **Explore the demo** on the sign-in screen. To host it as a static site, run `npm run build:demo` and serve `apps/web/dist`; the **Deploy demo** workflow publishes the same build to GitHub Pages.
+
+## How it works
+
+```mermaid
+flowchart LR
+  A[Create project<br/>origin and path scope] --> B[Discover<br/>read-only crawl]
+  B --> C[Generate drafts<br/>deterministic or AI]
+  C --> D{Human review}
+  D -- approve --> E[Run approved tests]
+  D -- reject --> X[Never executed]
+  E --> F[Report<br/>JSON, JUnit XML, CSV]
+```
+
+```mermaid
+flowchart LR
+  UI[React workspace<br/>apps/web] -->|Bearer token| API[NestJS API<br/>apps/api]
+  API --> DB[(PostgreSQL<br/>projects, approvals, job queue, audit)]
+  API --> W[Worker loop]
+  W --> PW[Constrained Playwright<br/>pinned transport, no scripts]
+  API -. optional, with consent .-> AI[OpenAI Responses API]
+```
 
 ## What works
 
@@ -9,8 +51,12 @@ A human-supervised web testing workspace built with React, TypeScript, NestJS, P
 - Optional OpenAI Responses API generation with structured output, explicit data-transfer consent and independent evidence validation. No key means clearly labelled **deterministic** generation; provider failures never silently become AI success.
 - A small test language: visit a discovered path and check its observed title/headings. No generated JavaScript is evaluated.
 - Draft → approved/rejected decisions bound to SHA-256 of the specification and immutable discovery ID. Queued runs freeze specs and revalidate approval before execution.
-- PostgreSQL job queue, crash expiry, audit history, assertion outcomes, durations and downloadable JSON reports.
-- Responsive React workspace and CI build/security/workflow/browser tests.
+- PostgreSQL job queue, crash expiry, audit history, assertion outcomes and durations.
+- Review queue with status filters and search; pass-rate summary and a run trend across recent runs.
+- Reports exported as JSON, **JUnit XML** (for CI dashboards) or CSV.
+- In-browser demo mode with sample data, for showing the workflow without a backend.
+- Responsive React workspace with an error boundary, request timeouts and background-tab polling pause.
+- CI on every push and pull request: build, unit, workflow, browser and end-to-end tests, secret scan and dependency audit.
 
 ## Run locally
 
@@ -62,6 +108,7 @@ The source scan checks recognizable key/private-key patterns; it is not proof th
 | Path                        | Purpose                                                       |
 | --------------------------- | ------------------------------------------------------------- |
 | `apps/web`                  | React workspace, review flow, reports                         |
+| `apps/web/src/lib`          | API client, demo backend, report exports (unit tested)        |
 | `apps/api/src/app.ts`       | NestJS endpoints, bearer auth, validation errors, rate limits |
 | `apps/api/src/service.ts`   | Approval state machine, transactions, queue, audit            |
 | `apps/api/src/browser.ts`   | Constrained Playwright discovery/execution                    |
