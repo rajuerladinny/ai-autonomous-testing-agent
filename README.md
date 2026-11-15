@@ -53,6 +53,8 @@ flowchart LR
 - Draft → approved/rejected decisions bound to SHA-256 of the specification and immutable discovery ID. Queued runs freeze specs and revalidate approval before execution.
 - PostgreSQL job queue, crash expiry, audit history, assertion outcomes and durations.
 - Review queue with status filters and search; pass-rate summary and a run trend across recent runs.
+- Regression flags: each run is compared with the previous one, marking new failures and fixes.
+- Cancel a queued discovery or run before the worker starts it; re-run a previous run's tests in one click; select all approved tests at once.
 - Reports exported as JSON, **JUnit XML** (for CI dashboards) or CSV.
 - In-browser demo mode with sample data, for showing the workflow without a backend.
 - Responsive React workspace with an error boundary, request timeouts and background-tab polling pause.
@@ -124,4 +126,4 @@ The source scan checks recognizable key/private-key patterns; it is not proof th
 
 This release covers **unauthenticated, server-rendered, read-only smoke tests**. It does not test React-only client-rendered target screens, login flows, clicks, form validation, payments or destructive journeys. Those require a separately designed interaction policy, synthetic accounts, isolated browser workers and a more detailed approval model. Missing requirements can still produce missing tests: discovered headings/titles are evidence of the current UI, not a statement of intended business behavior.
 
-Full regression assurance, screenshot/trace storage, schedules, secrets vaults, team RBAC, cancellation and retention controls are future work. The current single-admin token is for local evaluation.
+Full regression assurance, screenshot/trace storage, schedules, secrets vaults, team RBAC, cancellation of running jobs and retention controls are future work. The current single-admin token is for local evaluation.

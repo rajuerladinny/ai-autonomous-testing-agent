@@ -75,6 +75,33 @@ export function passRate(runs: Pick<Run, 'results'>[]) {
   return Math.round((results.filter((r) => r.status === 'PASSED').length / results.length) * 100);
 }
 
+export type Change = 'REGRESSED' | 'FIXED';
+
+/** Tests whose outcome flipped between two runs. Tests present in only one run are ignored. */
+export function compareRuns(
+  current: Pick<Run, 'results'>,
+  previous: Pick<Run, 'results'> | undefined,
+) {
+  const changes = new Map<string, Change>();
+  if (!previous) return changes;
+  const before = new Map(previous.results.map((r) => [r.testId, r.status]));
+  for (const r of current.results) {
+    const was = before.get(r.testId);
+    if (was && was !== r.status) changes.set(r.testId, r.status === 'FAILED' ? 'REGRESSED' : 'FIXED');
+  }
+  return changes;
+}
+
+/** The finished run immediately before `runId` in a newest-first list. */
+export function previousFinished<T extends Pick<Run, 'id' | 'status' | 'results'>>(
+  runs: T[],
+  runId: string,
+) {
+  const index = runs.findIndex((r) => r.id === runId);
+  if (index < 0) return undefined;
+  return runs.slice(index + 1).find((r) => r.status === 'SUCCEEDED' && r.results.length > 0);
+}
+
 export function downloadText(filename: string, text: string, type: string) {
   const objectUrl = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement('a');

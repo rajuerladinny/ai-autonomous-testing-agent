@@ -19,6 +19,8 @@ Successful reads return HTTP 200, creates/actions HTTP 201. Invalid input/policy
 | GET    | `/projects/:id/runs`                | Latest 50 runs                                                                      |
 | GET    | `/runs/:id/report`                  | Run, summary and frozen approval records                                            |
 | GET    | `/projects/:id/events`              | Latest 100 audit events related to that project                                     |
+| POST   | `/discoveries/:id/cancel`           | Cancel a discovery that is still `QUEUED`; `409` once the worker has claimed it     |
+| POST   | `/runs/:id/cancel`                  | Cancel a run that is still `QUEUED`; `409` once the worker has claimed it           |
 
 Project input:
 
@@ -72,6 +74,8 @@ Report shape:
   "approvals": [{ "testId": "test-uuid", "digest": "64 lowercase hex characters" }]
 }
 ```
+
+A cancelled job is recorded as `FAILED` with the error `Cancelled before it started` and a `JOB_CANCELLED` audit event. Running jobs cannot be cancelled.
 
 `QUEUED`/`RUNNING` reports may have no results yet. An infrastructure-failed run may have fewer results than selected tests. Clients must inspect job status as well as assertion totals.
 
