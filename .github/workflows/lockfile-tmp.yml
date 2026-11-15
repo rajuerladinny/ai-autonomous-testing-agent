@@ -1,0 +1,26 @@
+name: Regenerate lockfile (temporary)
+on:
+  push:
+    branches: ['tmp/lockfile']
+permissions:
+  contents: read
+jobs:
+  lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm --version
+      - run: npm install --package-lock-only --ignore-scripts
+      - run: npm audit fix --package-lock-only --ignore-scripts || true
+      - run: npm audit --audit-level=moderate || true
+      - run: git diff --stat
+      - run: |
+          echo "=====LOCK-BEGIN====="
+          gzip -9 -c package-lock.json | base64 -w 76
+          echo "=====LOCK-END====="
