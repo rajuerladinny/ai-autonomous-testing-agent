@@ -9,6 +9,8 @@
 
 A human-supervised web testing workspace. Sentinel discovers the pages of a site you are authorized to test, drafts smoke tests from what it actually saw, and runs only the tests a person has approved. Built with React, TypeScript, NestJS, PostgreSQL and Playwright.
 
+**Live demo:** https://rajuerladinny.github.io/ai-autonomous-testing-agent/ (runs in the browser with sample data; no login)
+
 **Status:** MVP for local evaluation. See [Current scope](#current-scope) for what it does not do yet.
 
 ## Try the demo
