@@ -1,5 +1,9 @@
 # Sentinel — AI Autonomous Testing Agent
 
+
+![README hits](https://hitscounter.dev/api/hit?url=https%3A%2F%2Fgithub.com%2Frajuerladinny%2Fai-autonomous-testing-agent&label=README%20Hits&icon=github&color=%230a58ca)
+
+
 [![Verify](https://github.com/rajuerladinny/ai-autonomous-testing-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/rajuerladinny/ai-autonomous-testing-agent/actions/workflows/ci.yml)
 ![React 19](https://img.shields.io/badge/React-19-149eca)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
